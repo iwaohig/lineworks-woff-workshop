@@ -16,12 +16,17 @@ LINE WORKS の WOFF (LINE WORKS Front-end Framework) アプリを、ブラウザ
 
 ## 作ったアプリを LINE WORKS で開くまで
 
+Colab のノートブック: **[woff_workshop.ipynb を Colab で開く](https://colab.research.google.com/github/iwaohig/lineworks-woff-workshop/blob/main/colab/woff_workshop.ipynb)**
+
 1. [Developer Console](https://dev.worksmobile.com/jp/) で WOFF アプリを登録し、WOFF ID を受け取る
+   (Endpoint URL は仮の URL で構いません。あとで書き換えても WOFF ID は変わりません。QR を使うなら Scan QR を ON)
 2. エディターで作り、WOFF ID を入れて `index.html` をダウンロードする
-3. Google Colab で `index.html` を配信し、トンネルで HTTPS の URL を作る
-   (手順: [LINE WORKS WOFF アプリを Google Colab を使って簡単に試す](https://qiita.com/iwaohig/items/030273863d41d67b2b6a))
+3. Colab のノートブックで `index.html` をアップロードし、トンネルで `https://` の URL を作る
 4. その URL を WOFF アプリの Endpoint URL に設定する
-5. LINE WORKS のトークから開く
+5. LINE WORKS のトークに WOFF URL (`https://woff.worksmobile.com/woff/{WOFF ID}`) を送り、タップして開く
+
+ノートブックは `colab/build_nb.py` から作っています (`python colab/build_nb.py`)。
+参考: [LINE WORKS WOFF アプリを Google Colab を使って簡単に試す](https://qiita.com/iwaohig/items/030273863d41d67b2b6a)
 
 ## 注意
 
