@@ -25,7 +25,7 @@ LINE WORKS の WOFF (LINE WORKS Front-end Framework) アプリを、ブラウザ
 
 ## 注意
 
-- `woff.sendMessage()` でトークに送れるのは、トークルームから開いたときだけです
+- `woff.sendMessage()` でトークに送れるのは、モバイルアプリのトークルームから開いたときだけです。Client App に `bot` か `bot.message` の Scope が要ります
 - 外部ブラウザーで開くとログインが必要です ([参考](https://qiita.com/iwaohig/items/186863fcf7e443b90713))
 - Colab のトンネルの URL は一時的なものです。止めると変わるので、続けて使うなら GitHub Pages などに置いてください ([参考](https://qiita.com/iwaohig/items/57e201a6dbaa72cae61f))
 

@@ -329,7 +329,7 @@
   "use strict";
 
   // ===================== 初期値 =====================
-  var SDK_URL = "https://static.worksmobile.net/static/wm/woff/edge/3.6/sdk.js";
+  var SDK_URL = "https://static.worksmobile.net/static/wm/woff/edge/3.7.4/sdk.js";
   var EMOJIS = ["🏫", "📚", "✏️", "🌱", "⭐", "🚀", "🎒", "🧸", "🎨", "🔔", "💬", "🐣"];
   var COLORS = ["#00C85F", "#2E7CF6", "#F5A623", "#E8505B", "#8E5CF2", "#202936"];
   var DEFAULT = {
@@ -612,24 +612,26 @@
     out.push('');
     out.push('document.getElementById("close").onclick = () => woff.closeWindow();');
     out.push('');
-    out.push('// WOFF を使えるようにして、開いた人の情報を取る');
-    out.push('woff.init({ woffId: WOFF_ID })');
-    out.push('  .then(() => {');
-    out.push('    // 外部ブラウザで開いたときは、先にログインが必要');
-    out.push('    if (!woff.isInClient() && !woff.isLoggedIn()) {');
-    out.push('      woff.login();');
-    out.push('      return null;');
-    out.push('    }');
-    out.push('    return woff.getProfile();');
-    out.push('  })');
-    out.push('  .then(profile => {');
-    out.push('    if (!profile) return;');
-    out.push('    me = profile;');
-    out.push('    document.getElementById("greeting").textContent = GREET ? greet(profile.displayName) : "ボタンを押すとトークに送ります";');
-    out.push('  })');
-    out.push('  .catch(err => {');
-    out.push('    document.getElementById("greeting").textContent = "WOFF を使えませんでした: " + (err.message || err);');
-    out.push('  });');
+    out.push('// WOFF を使えるようにして、開いた人の情報を取る (ページを読み込み終えてから)');
+    out.push('window.addEventListener("load", () => {');
+    out.push('  woff.init({ woffId: WOFF_ID })');
+    out.push('    .then(() => {');
+    out.push('      // 外部ブラウザで開いたときは、先にログインが必要');
+    out.push('      if (!woff.isInClient() && !woff.isLoggedIn()) {');
+    out.push('        woff.login();');
+    out.push('        return null;');
+    out.push('      }');
+    out.push('      return woff.getProfile();');
+    out.push('    })');
+    out.push('    .then(profile => {');
+    out.push('      if (!profile) return;');
+    out.push('      me = profile;');
+    out.push('      document.getElementById("greeting").textContent = GREET ? greet(profile.displayName) : "ボタンを押すとトークに送ります";');
+    out.push('    })');
+    out.push('    .catch(err => {');
+    out.push('      document.getElementById("greeting").textContent = "WOFF を使えませんでした: " + (err.message || err);');
+    out.push('    });');
+    out.push('});');
     out.push('<\/script>');
     out.push('</body>');
     out.push('</html>');
