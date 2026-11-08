@@ -44,6 +44,9 @@ md(f"""
    - QR の部品を使うときは **Scan QR を ON** にします
    - 書き換えても WOFF ID は変わりません
 3. [エディター]({EDITOR}) で作り、WOFF ID を入れて `index.html` をダウンロードしておきます。
+
+> 最初のセルを実行すると「このノートブックは Google が作成したものではありません」と出ます。
+> GitHub から開いたノートブックには必ず出る確認です。**「このまま実行」** を押します。
 """)
 
 md("""
@@ -113,7 +116,7 @@ print("Bot の認証情報:", "6 つとも入っています (4-2 が使えま�
 md("""
 ## 1. `index.html` をアップロードする
 
-エディターでダウンロードした `index.html` を選びます。
+実行するとセルの下に **「ファイルを選択」** が出るので、エディターでダウンロードした `index.html` を選びます。
 WOFF ID が入っているかと、WOFF SDK を読み込んでいるかを確かめます。
 """)
 
@@ -218,16 +221,16 @@ if not ENDPOINT_URL:
     print("トンネルの URL が取れませんでした。少し待ってから 2-2 をもう一度実行してください\n")
     print("".join(log[-10:]))
 else:
-    # トンネルがつながるまで数秒かかるので、開けるようになるまで待つ
-    for _ in range(20):
-        try:
-            if requests.get(ENDPOINT_URL, timeout=5).status_code == 200:
-                break
-        except requests.RequestException:
-            pass
-        time.sleep(2)
     print("Endpoint URL:", ENDPOINT_URL)
     print("\nこの URL をコピーして、3 章の手順で WOFF アプリの Endpoint URL に設定してください")
+    # できたばかりの URL は、つながるまで少しかかることがある。30 秒まで確かめる
+    ready, until = False, time.time() + 30
+    while not ready and time.time() < until:
+        try:
+            ready = requests.get(ENDPOINT_URL, timeout=5).status_code == 200
+        except requests.RequestException:
+            time.sleep(3)
+    print("\nつながりました" if ready else "\n(まだつながっていないかもしれません。30 秒ほど待ってから開いてください)")
 ''')
 
 md("""
