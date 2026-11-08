@@ -172,7 +172,11 @@ document.getElementById("formSend").onclick = () => {
 // QR でチェックイン
 document.getElementById("qrScan").onclick = () => {
   woff.scanQR()
-    .then(result => send(fill(QR_MESSAGE, { QR: result.value })))
+    .then(result => {
+      // 読み取らずに閉じたときは value が空になる
+      if (!result || !result.value) return show("QR の読み取りを取り消しました");
+      return send(fill(QR_MESSAGE, { QR: result.value }));
+    })
     .catch(err => show("読み取れませんでした: " + (err.message || err)));
 };
 

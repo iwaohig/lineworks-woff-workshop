@@ -579,7 +579,11 @@
       out.push('// QR でチェックイン');
       out.push('document.getElementById("qrScan").onclick = () => {');
       out.push('  woff.scanQR()');
-      out.push('    .then(result => send(fill(QR_MESSAGE, { QR: result.value })))');
+      out.push('    .then(result => {');
+      out.push('      // 読み取らずに閉じたときは value が空になる');
+      out.push('      if (!result || !result.value) return show("QR の読み取りを取り消しました");');
+      out.push('      return send(fill(QR_MESSAGE, { QR: result.value }));');
+      out.push('    })');
       out.push('    .catch(err => show("読み取れませんでした: " + (err.message || err)));');
       out.push('};');
     }
