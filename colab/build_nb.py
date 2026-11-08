@@ -33,8 +33,9 @@ md(f"""
 | 3 | Endpoint URL を設定する (Developer Console) |
 | 4 | トークから開く |
 | 5 | QR コードの見本を出す (QR の部品を使うとき) |
-| 6 | 作り直したファイルに差し替える |
-| 7 | 終わったら止める |
+| 6 | Bot のリッチメニューから開く |
+| 7 | 作り直したファイルに差し替える |
+| 8 | 終わったら止める |
 
 ## 始める前に
 
@@ -52,8 +53,9 @@ md(f"""
 md("""
 ## 0. 準備
 
-ライブラリを入れて、4-2 (Bot からボタンを送る) で使う認証情報を読みます。
+ライブラリを入れて、4-2 (Bot からボタンを送る) と 6 (リッチメニュー) で使う、Bot の認証情報を読みます。
 **Bot を使わないなら、シークレットは要りません。** 未設定のままで 1 章に進めます。
+前回 (第2回) のノートブックで入れたシークレットと同じ名前です。
 
 Bot を使うときは、左の鍵のアイコン (シークレット) に次の 6 つを入れ、それぞれ「ノートブックからのアクセス」を ON にします。
 値はノートブックには保存されません。入れる間は画面共有を止めてください。
@@ -70,7 +72,7 @@ Bot を使うときは、左の鍵のアイコン (シークレット) に次の
 
 code(r'''
 # @title 0. 準備
-!pip -q install qrcode
+!pip -q install qrcode pyjwt cryptography japanize-matplotlib
 
 import json, os, queue, re, subprocess, threading, time
 from pathlib import Path
@@ -109,8 +111,26 @@ except NameError:
     pass
 
 BOT_READY = all(conf[n] for n in NAMES) or None
+API = "https://www.worksapis.com/v1.0"
+
+
+def bot_token(scope="bot"):
+    """Service Account 認証で Bot 用のアクセストークンを作る (第2回の 1-1・1-2 と同じ)"""
+    import jwt
+    now = int(time.time())
+    assertion = jwt.encode({"iss": conf["LW_CLIENT_ID"], "sub": conf["LW_SERVICE_ACCOUNT"], "iat": now, "exp": now + 600},
+                           conf["LW_PRIVATE_KEY"], algorithm="RS256")
+    r = requests.post("https://auth.worksmobile.com/oauth2/v2.0/token", data={
+        "assertion": assertion, "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "client_id": conf["LW_CLIENT_ID"], "client_secret": conf["LW_CLIENT_SECRET"], "scope": scope,
+    }, timeout=30)
+    if r.status_code != 200:
+        raise Stop(f"トークンを作れませんでした ({r.status_code})。シークレットの値を確かめてください: {r.text[:200]}")
+    return r.json()["access_token"]
+
+
 print("準備ができました。")
-print("Bot の認証情報:", "6 つとも入っています (4-2 が使えます)" if BOT_READY else "未設定 (4-1 の方法で開きます)")
+print("Bot の認証情報:", "6 つとも入っています (4-2・6 が使えます)" if BOT_READY else "未設定 (4-1 の方法で開きます。6 は使えません)")
 ''')
 
 md("""
@@ -266,23 +286,11 @@ code(r'''
 LABEL = "ミニアプリを開く"  # @param {type:"string"}
 need("WOFF_ID", "先に 1 を実行してください")
 need("BOT_READY", "Bot の認証情報が未設定です。0 の表のシークレットを入れて 0 を実行し直すか、4-1 の方法で開いてください")
-!pip -q install pyjwt cryptography
-import jwt
-
-now = int(time.time())
-assertion = jwt.encode({"iss": conf["LW_CLIENT_ID"], "sub": conf["LW_SERVICE_ACCOUNT"], "iat": now, "exp": now + 600},
-                       conf["LW_PRIVATE_KEY"], algorithm="RS256")
-r = requests.post("https://auth.worksmobile.com/oauth2/v2.0/token", data={
-    "assertion": assertion, "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-    "client_id": conf["LW_CLIENT_ID"], "client_secret": conf["LW_CLIENT_SECRET"], "scope": "bot",
-}, timeout=30)
-if r.status_code != 200:
-    raise Stop(f"トークンを作れませんでした ({r.status_code})。シークレットの値を確かめてください: {r.text[:200]}")
-token = r.json()["access_token"]
+token = bot_token()
 
 body = {"content": {"type": "button_template", "contentText": "作ったミニアプリを開きます",
                     "actions": [{"type": "uri", "label": LABEL, "uri": f"https://woff.worksmobile.com/woff/{WOFF_ID}"}]}}
-r = requests.post(f"https://www.worksapis.com/v1.0/bots/{conf['LW_BOT_ID']}/users/{conf['LW_MY_ID']}/messages",
+r = requests.post(f"{API}/bots/{conf['LW_BOT_ID']}/users/{conf['LW_MY_ID']}/messages",
                   headers={"Authorization": f"Bearer {token}"}, json=body, timeout=30)
 print("送信:", r.status_code, "(201 なら成功。スマホの Bot とのトークを見てください)" if r.status_code == 201 else r.text[:300])
 ''')
@@ -303,21 +311,113 @@ display(qrcode.make(TEXT, box_size=10, border=4))
 ''')
 
 md("""
-## 6. 作り直したファイルに差し替える
+## 6. Bot のリッチメニューから開く
+
+Bot のトークの下に出る、画像のボタンのメニュー (リッチメニュー) を作り、その 1 つで WOFF を開きます。
+リッチメニューは管理画面からは作れず、API で登録します。**0 のシークレット (Bot の認証情報) が要ります。**
+
+1. メニューの画像を作る (6-1。ボタンの文字を変えられます)
+2. メニューを登録し、画像を付けて、既定にする (6-2)
+3. スマホで Bot とのトークを開き、下のメニューの「左のボタン」で WOFF が開くか確かめる
+
+> 画像が出るのはモバイル版だけです。PC 版・ブラウザ版では文字のボタンになります。
+> リッチメニューを作ると、Bot の固定メニューは出なくなります。元に戻すときは 6-3 を実行します。
+""")
+
+code(r'''
+# @title 6-1. メニューの画像を作る (2500×843)
+LEFT = "ミニアプリ"  # @param {type:"string"}
+CENTER = "使い方"  # @param {type:"string"}
+RIGHT = "こんにちは"  # @param {type:"string"}
+import importlib.util
+from PIL import Image, ImageDraw, ImageFont
+from IPython.display import display
+
+spec = importlib.util.find_spec("japanize_matplotlib")
+FONT_PATH = str(Path(spec.submodule_search_locations[0]) / "fonts" / "ipaexg.ttf")  # 日本語のフォント (IPAex ゴシック)
+W, H = 2500, 843
+COLS = [(0, 833), (833, 834), (1667, 833)]  # 3 つのボタンの x と幅
+img = Image.new("RGB", (W, H), "white")
+d = ImageDraw.Draw(img)
+font = ImageFont.truetype(FONT_PATH, 110)
+small = ImageFont.truetype(FONT_PATH, 56)
+for (x, w), label, sub, color in zip(COLS, [LEFT, CENTER, RIGHT], ["WOFF を開く", "ページを開く", "トークに送る"],
+                                     ["#00C85F", "#202936", "#5B6475"]):
+    d.rounded_rectangle([x + 30, 30, x + w - 30, H - 30], radius=60, fill=color)
+    tw = d.textlength(label, font=font)
+    d.text((x + (w - tw) / 2, H / 2 - 120), label, font=font, fill="white")
+    sw = d.textlength(sub, font=small)
+    d.text((x + (w - sw) / 2, H / 2 + 60), sub, font=small, fill="white")
+MENU_PNG = WORKDIR / "richmenu.png"
+img.save(MENU_PNG)
+display(img.resize((W // 4, H // 4)))
+print("画像を作りました:", MENU_PNG.name, f"({MENU_PNG.stat().st_size:,} バイト。1 MB 以下ならよい)")
+''')
+
+code(r'''
+# @title 6-2. メニューを登録して、既定にする
+HELP_URL = "https://iwaohig.github.io/lineworks-woff-workshop/"  # @param {type:"string"}
+need("MENU_PNG", "先に 6-1 を実行してください")
+need("WOFF_ID", "先に 1 を実行してください")
+need("BOT_READY", "Bot の認証情報が未設定です。0 の表のシークレットを入れて、0 を実行し直してください")
+token = bot_token()
+H_ = {"Authorization": f"Bearer {token}"}
+BOT = conf["LW_BOT_ID"]
+
+# ① メニューを作る: ボタンの位置 (bounds) と、押したときの動き (action)
+menu = {"richmenuName": "勉強会のメニュー", "size": {"width": 2500, "height": 843}, "areas": [
+    {"bounds": {"x": x, "y": 0, "width": w, "height": 843}, "action": act}
+    for (x, w), act in zip(COLS, [
+        {"type": "uri", "label": LEFT, "uri": f"https://woff.worksmobile.com/woff/{WOFF_ID}"},
+        {"type": "uri", "label": CENTER, "uri": HELP_URL},
+        {"type": "message", "label": RIGHT, "text": RIGHT}])]}
+r = requests.post(f"{API}/bots/{BOT}/richmenus", headers=H_, json=menu, timeout=30)
+print("① メニューを作る     :", r.status_code)
+if r.status_code not in (200, 201):
+    raise Stop(f"メニューを作れませんでした: {r.text[:300]}")
+RICHMENU_ID = str(r.json()["richmenuId"])
+
+# ② 画像をアップロードする (アップロード先の URL を受け取ってから送る)
+r = requests.post(f"{API}/bots/{BOT}/attachments", headers=H_, json={"fileName": "richmenu.png"}, timeout=30)
+up = r.json()
+r = requests.post(up["uploadUrl"], headers=H_, files={"Filedata": ("richmenu.png", MENU_PNG.read_bytes(), "image/png")},
+                  data={"resourceName": "richmenu.png"}, timeout=120)
+print("② 画像をアップロード :", r.status_code)
+
+# ③ メニューに画像を付ける → ④ 既定にする (Bot を使う全員に出る)
+r = requests.post(f"{API}/bots/{BOT}/richmenus/{RICHMENU_ID}/image", headers=H_, json={"fileId": up["fileId"]}, timeout=30)
+print("③ 画像を付ける       :", r.status_code)
+r = requests.post(f"{API}/bots/{BOT}/richmenus/{RICHMENU_ID}/set-default", headers=H_, timeout=30)
+print("④ 既定にする         :", r.status_code)
+print()
+print("スマホで Bot とのトークを開き直すと、下にメニューが出ます (richmenuId:", RICHMENU_ID + ")")
+''')
+
+code(r'''
+# @title 6-3. 作ったメニューを消す (元に戻すとき)
+need("RICHMENU_ID", "6-2 で作ったメニューがありません (ランタイムが切れたときは、Bot のメニューは残っています)")
+token = bot_token()
+r = requests.delete(f"{API}/bots/{conf['LW_BOT_ID']}/richmenus/{RICHMENU_ID}", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+print("メニューを消しました" if r.status_code == 204 else f"消せませんでした: {r.status_code} {r.text[:200]}")
+RICHMENU_ID = None
+''')
+
+md("""
+## 7. 作り直したファイルに差し替える
 
 エディターで直して `index.html` をダウンロードし直したら、**1 だけ**を実行し直します。
 配信もトンネルもそのままなので、Endpoint URL は変わりません。スマホで WOFF を閉じて、開き直してください。
 """)
 
 md("""
-## 7. 終わったら止める
+## 8. 終わったら止める
 
 トンネルを止めると、Endpoint URL は開けなくなります。
 続けて使うなら、`index.html` を GitHub Pages などの置き場所に置き、Endpoint URL をそちらに書き換えます。
 """)
 
 code(r'''
-# @title 7. トンネルを止める
+# @title 8. トンネルを止める
 if globals().get("tunnel") is not None and tunnel.poll() is None:
     tunnel.terminate()
     print("トンネルを止めました")
