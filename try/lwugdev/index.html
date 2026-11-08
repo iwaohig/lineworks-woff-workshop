@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ワンタップ報告</title>
+<style>
+  /* ★ --main を変えると、全体の色が変わります */
+  :root { --main: #00C85F; --bg: #f5f7fa; --text: #1f2933; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--main); color: #fff; padding: 24px 16px 18px; }
+  header .icon { font-size: 40px; line-height: 1; }
+  header h1 { margin: 8px 0 4px; font-size: 22px; }
+  #greeting { margin: 0; font-size: 14px; opacity: .95; }
+  main { padding: 16px; display: grid; gap: 14px; }
+  /* ★ border-radius を変えると、カードの角の丸さが変わります */
+  .card { background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+  .card h2 { margin: 0 0 6px; font-size: 15px; }
+  .note { margin: 0; font-size: 13px; color: #52606d; }
+  button.action { display: block; width: 100%; padding: 14px; margin-top: 8px; border: 0; border-radius: 10px; background: var(--main); color: #fff; font-size: 16px; font-weight: bold; }
+  button.sub { background: #fff; color: var(--main); border: 2px solid var(--main); }
+  label { display: block; font-size: 13px; margin-top: 8px; }
+  select, input, textarea { width: 100%; padding: 10px; margin-top: 4px; font-size: 15px; border: 1px solid #cbd2d9; border-radius: 8px; font-family: inherit; }
+  .result { font-size: 22px; font-weight: bold; text-align: center; margin: 10px 0 4px; min-height: 1.4em; }
+  #status { font-size: 13px; color: #52606d; text-align: center; min-height: 1.2em; margin: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="icon">📚</div>
+  <!-- ★ アプリの名前 -->
+  <h1>ワンタップ報告</h1>
+  <p id="greeting">読み込み中…</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>ワンタップ報告</h2>
+    <p class="note">押すと、このトークルームに送ります。</p>
+    <div id="buttons"></div>
+  </section>
+
+  <!-- 部品: 依頼フォーム -->
+  <section class="card">
+    <h2>備品の補充依頼</h2>
+    <label>品目<select id="formItem"></select></label>
+    <label>数量<input id="formQty" type="number" min="1" value="1"></label>
+    <label>メモ<textarea id="formMemo" rows="2" placeholder="急ぎかどうか、置き場所など"></textarea></label>
+    <button class="action" id="formSend">依頼を送る</button>
+  </section>
+
+  <!-- 部品: QR でチェックイン -->
+  <section class="card">
+    <h2>QR でチェックイン</h2>
+    <p class="note">QR コードを読み取ると、トークに送ります。</p>
+    <button class="action" id="qrScan">QR を読み取る</button>
+  </section>
+
+  <!-- 部品: 当番ルーレット -->
+  <section class="card">
+    <h2>今日の当番ルーレット</h2>
+    <div class="result" id="rouletteResult">?</div>
+    <button class="action" id="rouletteSpin">回す</button>
+    <button class="action sub" id="rouletteSend" hidden>結果をトークに送る</button>
+  </section>
+
+  <p id="status"></p>
+  <button class="action sub" id="close">閉じる</button>
+</main>
+
+<!-- WOFF SDK -->
+<script charset="utf-8" src="https://static.worksmobile.net/static/wm/woff/edge/3.7.4/sdk.js"></script>
+<script>
+// ===== ★ここを変えてみよう (設定) =====
+
+// Developer Console で発行された WOFF ID
+const WOFF_ID = "Rj9mhTWjN4Zi6nd7TM-T9Q";
+
+// ワンタップ報告のボタン。label がボタンの文字、message がトークに送る文
+// {名前} {時刻} {日付} は、送るときに置き換わります
+const BUTTONS = [
+  {
+    "label": "着きました",
+    "message": "{名前}です。{時刻} に着きました。"
+  },
+  {
+    "label": "少し遅れます",
+    "message": "{名前}です。10 分ほど遅れます。"
+  },
+  {
+    "label": "終わりました",
+    "message": "{名前}です。{時刻} に終わりました。"
+  }
+];
+
+// あいさつに名前を出すかどうか (true / false)
+const GREET = true;
+
+// 依頼フォームの選択肢
+const FORM_ITEMS = [
+  "コピー用紙",
+  "プリンターのトナー",
+  "ホワイトボードマーカー",
+  "テキスト・教材"
+];
+
+// QR を読み取ったときに送る文 ({QR} が読み取った中身になります)
+const QR_MESSAGE = "{名前}です。{QR}にチェックインしました ({時刻})。";
+
+// 当番ルーレットの名前
+const ROULETTE_NAMES = [
+  "あおい",
+  "かいと",
+  "さくら",
+  "はると"
+];
+
+// ===== ここから下は仕組み (読めたら変えても OK) =====
+
+let me = { displayName: "" };
+
+// {名前} などを本当の値に置き換える
+function fill(text, extra) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const values = Object.assign({
+    "名前": me.displayName,
+    "時刻": pad(now.getHours()) + ":" + pad(now.getMinutes()),
+    "日付": (now.getMonth() + 1) + "/" + now.getDate()
+  }, extra || {});
+  return text.replace(/\{(.+?)\}/g, (all, key) => key in values ? values[key] : all);
+}
+
+function show(text) {
+  document.getElementById("status").textContent = text;
+}
+
+// トークに送る (トークルームから開いたときだけ送れます)
+function send(text) {
+  return woff.sendMessage({ content: text })
+    .then(() => show("トークに送りました"))
+    .catch(err => show("送れませんでした: " + (err.message || err)));
+}
+
+function greet(name) {
+  const h = new Date().getHours();
+  const word = h < 11 ? "おはようございます" : h < 18 ? "こんにちは" : "お疲れさまです";
+  return name + "さん、" + word;
+}
+
+// ボタンを並べる
+BUTTONS.forEach(b => {
+  const el = document.createElement("button");
+  el.className = "action";
+  el.textContent = b.label;
+  el.onclick = () => send(fill(b.message));
+  document.getElementById("buttons").appendChild(el);
+});
+
+// 依頼フォーム
+const formItem = document.getElementById("formItem");
+FORM_ITEMS.forEach(x => formItem.add(new Option(x, x)));
+document.getElementById("formSend").onclick = () => {
+  const qty = document.getElementById("formQty").value;
+  const memo = document.getElementById("formMemo").value || "なし";
+  send("【備品の補充依頼】\n品目: " + formItem.value + "\n数量: " + qty + "\nメモ: " + memo + "\n" + fill("依頼: {名前} ({日付} {時刻})"));
+};
+
+// QR でチェックイン
+document.getElementById("qrScan").onclick = () => {
+  woff.scanQR()
+    .then(result => {
+      // 読み取らずに閉じたときは value が空になる
+      if (!result || !result.value) return show("QR の読み取りを取り消しました");
+      return send(fill(QR_MESSAGE, { QR: result.value }));
+    })
+    .catch(err => show("読み取れませんでした: " + (err.message || err)));
+};
+
+// 当番ルーレット
+let picked = "";
+document.getElementById("rouletteSpin").onclick = () => {
+  const box = document.getElementById("rouletteResult");
+  let count = 0;
+  const timer = setInterval(() => {
+    picked = ROULETTE_NAMES[Math.floor(Math.random() * ROULETTE_NAMES.length)];
+    box.textContent = picked;
+    if (++count > 15) {
+      clearInterval(timer);
+      box.textContent = "🎉 " + picked + " さん";
+      document.getElementById("rouletteSend").hidden = false;
+    }
+  }, 80);
+};
+document.getElementById("rouletteSend").onclick = () => send(fill("今日の当番は " + picked + " さんです! ({日付})"));
+
+document.getElementById("close").onclick = () => woff.closeWindow();
+
+// WOFF を使えるようにして、開いた人の情報を取る (ページを読み込み終えてから)
+window.addEventListener("load", () => {
+  woff.init({ woffId: WOFF_ID })
+    .then(() => {
+      // 外部ブラウザで開いたときは、先にログインが必要
+      if (!woff.isInClient() && !woff.isLoggedIn()) {
+        woff.login();
+        return null;
+      }
+      return woff.getProfile();
+    })
+    .then(profile => {
+      if (!profile) return;
+      me = profile;
+      document.getElementById("greeting").textContent = GREET ? greet(profile.displayName) : "ボタンを押すとトークに送ります";
+    })
+    .catch(err => {
+      document.getElementById("greeting").textContent = "WOFF を使えませんでした: " + (err.message || err);
+    });
+});
+</script>
+</body>
+</html>
