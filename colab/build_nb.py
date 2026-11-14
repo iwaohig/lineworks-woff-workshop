@@ -110,27 +110,93 @@ try:  # Colab では Stop のときに案内の 1 行だけを出す
 except NameError:
     pass
 
-BOT_READY = all(conf[n] for n in NAMES) or None
 API = "https://www.worksapis.com/v1.0"
+SAME_APP = "Developer Console でアプリを 1 つ開き、その画面の Client ID・Client Secret・Service Account・秘密鍵を 4 つとも写してください"
+
+
+def _token_error(r):
+    """トークンのエラーを、どのシークレットを見直すかに言い換える"""
+    try:
+        body = r.json()
+    except ValueError:
+        body = {}
+    text = body.get("error_description") or body.get("error") or r.text[:200]
+    low = text.lower()
+    if "secret" in low or body.get("error") == "invalid_client":
+        why = "LW_CLIENT_SECRET が違います (Client ID と同じアプリの Client Secret を入れてください)"
+    elif "client_id" in low or "userid" in low:
+        why = "LW_CLIENT_ID と LW_SERVICE_ACCOUNT が同じアプリのものではないか、どちらかの値が違います。" + SAME_APP
+    elif "signature" in low or "assertion" in low or "jwt" in low:
+        why = "LW_PRIVATE_KEY が違います。Service Account と同じアプリの秘密鍵か、作り直す前の古い鍵でないかを確かめてください"
+    elif "scope" in low:
+        why = "アプリの Scope に bot が入っていません (Developer Console のアプリの OAuth Scopes)"
+    else:
+        why = "シークレットの値を確かめてください"
+    return f"トークンを作れませんでした ({r.status_code})。{why}\n   LINE WORKS の返事: {text}"
 
 
 def bot_token(scope="bot"):
     """Service Account 認証で Bot 用のアクセストークンを作る (第2回の 1-1・1-2 と同じ)"""
     import jwt
     now = int(time.time())
-    assertion = jwt.encode({"iss": conf["LW_CLIENT_ID"], "sub": conf["LW_SERVICE_ACCOUNT"], "iat": now, "exp": now + 600},
-                           conf["LW_PRIVATE_KEY"], algorithm="RS256")
+    try:
+        assertion = jwt.encode({"iss": conf["LW_CLIENT_ID"], "sub": conf["LW_SERVICE_ACCOUNT"], "iat": now, "exp": now + 600},
+                               conf["LW_PRIVATE_KEY"], algorithm="RS256")
+    except Exception:
+        raise Stop("LW_PRIVATE_KEY を秘密鍵として読めません。.key ファイルの中身を -----BEGIN の行から -----END の行まで、すべて貼ってください")
     r = requests.post("https://auth.worksmobile.com/oauth2/v2.0/token", data={
         "assertion": assertion, "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
         "client_id": conf["LW_CLIENT_ID"], "client_secret": conf["LW_CLIENT_SECRET"], "scope": scope,
     }, timeout=30)
     if r.status_code != 200:
-        raise Stop(f"トークンを作れませんでした ({r.status_code})。シークレットの値を確かめてください: {r.text[:200]}")
+        raise Stop(_token_error(r))
     return r.json()["access_token"]
 
 
+def _head_tail(v):
+    """アプリの画面と見比べるための前後 3 文字 (Client ID と Service Account だけに使う)"""
+    return f"{v[:3]}…{v[-3:]} ({len(v)} 文字)" if len(v) > 8 else f"({len(v)} 文字)"
+
+
+def check_bot():
+    """Bot の認証情報を確かめて、直す場所を出す。使えるときだけ True"""
+    if not any(conf[n] for n in NAMES):
+        print("Bot の認証情報: 未設定 (4-1 の方法で開きます。4-2・6 は使えません)")
+        return None
+    missing = [n for n in NAMES if not conf[n]]
+    if missing:
+        print("Bot の認証情報: 足りないシークレットがあります →", "、".join(missing))
+        print("   名前が表と 1 文字でも違うと読めません。「ノートブックからのアクセス」が OFF でも読めません")
+        return None
+    cid, sec, sa, key = (conf[n] for n in NAMES[:4])
+    problems = []
+    if cid == sec:
+        problems.append("LW_CLIENT_ID と LW_CLIENT_SECRET が同じ値です")
+    if not re.fullmatch(r"[\w.-]+\.serviceaccount@[\w.-]+", sa):
+        problems.append("LW_SERVICE_ACCOUNT が「xxxxx.serviceaccount@ドメイン」の形ではありません (LW_MY_ID と入れ違えていませんか)")
+    if "-----BEGIN" not in key or "-----END" not in key:
+        problems.append("LW_PRIVATE_KEY に -----BEGIN … -----END の行がありません (.key ファイルの中身をすべて貼ってください)")
+    if not conf["LW_BOT_ID"].isdigit():
+        problems.append("LW_BOT_ID が数字ではありません (Bot の一覧にある Bot ID)")
+    if "@" not in conf["LW_MY_ID"]:
+        problems.append("LW_MY_ID が「名前@ドメイン」の形ではありません (自分のログイン ID)")
+    if problems:
+        print("Bot の認証情報: 値の形が違うものがあります")
+        for p in problems:
+            print("   -", p)
+        return None
+    try:
+        bot_token()
+    except Stop as e:
+        print("Bot の認証情報: 6 つとも入っていますが、", e, sep="")
+        print("   見比べ用: Client ID", _head_tail(cid), "/ Service Account", _head_tail(sa))
+        return None
+    print("Bot の認証情報: 6 つとも入っていて、トークンも作れました (4-2・6 が使えます)")
+    return True
+
+
 print("準備ができました。")
-print("Bot の認証情報:", "6 つとも入っています (4-2・6 が使えます)" if BOT_READY else "未設定 (4-1 の方法で開きます。6 は使えません)")
+BOT_READY = check_bot()
 ''')
 
 md("""
@@ -285,7 +351,7 @@ code(r'''
 # @title 4-2. Bot から自分に「開く」ボタンを送る
 LABEL = "ミニアプリを開く"  # @param {type:"string"}
 need("WOFF_ID", "先に 1 を実行してください")
-need("BOT_READY", "Bot の認証情報が未設定です。0 の表のシークレットを入れて 0 を実行し直すか、4-1 の方法で開いてください")
+need("BOT_READY", "Bot の認証情報が使えません。0 の出力の「Bot の認証情報」に出た所を直して 0 を実行し直すか、4-1 の方法で開いてください")
 token = bot_token()
 
 body = {"content": {"type": "button_template", "contentText": "作ったミニアプリを開きます",
@@ -359,7 +425,7 @@ code(r'''
 HELP_URL = "https://iwaohig.github.io/lineworks-woff-workshop/"  # @param {type:"string"}
 need("MENU_PNG", "先に 6-1 を実行してください")
 need("WOFF_ID", "先に 1 を実行してください")
-need("BOT_READY", "Bot の認証情報が未設定です。0 の表のシークレットを入れて、0 を実行し直してください")
+need("BOT_READY", "Bot の認証情報が使えません。0 の出力の「Bot の認証情報」に出た所を直して、0 を実行し直してください")
 token = bot_token()
 H_ = {"Authorization": f"Bearer {token}"}
 BOT = conf["LW_BOT_ID"]
